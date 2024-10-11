@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>物体表面热力图 - Three.js InterpolatedGradientMaterial Temperature Heatmap Demo</title>
+		<style>
+			body {
+				margin: 0;
+				overflow: hidden;
+			}
+			canvas {
+				display: block;
+			}
+			#controls {
+				position: absolute;
+				top: 10px;
+				left: 10px;
+				background: rgba(0, 0, 0, 0.7);
+				color: white;
+				padding: 10px;
+				border-radius: 5px;
+			}
+			button {
+				margin-top: 5px;
+			}
+		</style>
+
+		<!-- Import map for module loading -->
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "https://cdn.jsdelivr.net/npm/three@0.164.0/build/three.module.js",
+					"lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.18.1/dist/lil-gui.esm.js",
+					"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.0/examples/jsm/",
+					"three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.164.0/examples/jsm/"
+				}
+			}
+		</script>
+	</head>
+	<body>
+		<div id="controls">
+			<label
+				><input type="checkbox" id="toggleShape" checked /> Show Shape</label
+			><br />
+			<label
+				><input type="checkbox" id="togglePoints" checked /> Show Temperature
+				Points</label
+			>
+			<button id="refreshPoints">Refresh Points</button>
+			<br />
+			<label
+				><input type="radio" name="geometryType" value="torusKnot" checked />
+				TorusKnot</label
+			>
+			<label
+				><input type="radio" name="geometryType" value="mergedBoxes" /> Merged
+				Boxes</label
+			>
+		</div>
+
+		<script type="module">
+			// 引入模块
+			import * as THREE from "three";
+			import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+			import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
+			import { InterpolatedGradientMaterial } from "./InterpolatedGradientMaterial.js"; // 导入自定义材质
+			import GUI from "lil-gui";
+
+			// 场景设置
+			const scene = new THREE.Scene();
+			const camera = new THREE.PerspectiveCamera(
+				75,
+				window.innerWidth / window.innerHeight,
+				0.1,
+				1000
+			);
+			const renderer = new THREE.WebGLRenderer();
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			document.body.appendChild(renderer.domElement);
+
+			// 添加光源
+			const ambientLight = new THREE.AmbientLight(0x404040);
+			scene.add(ambientLight);
+
+			const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+			directionalLight.position.set(1, 1, 1);
+			scene.add(directionalLight);
+
+			// 添加 OrbitControls
+			const controls = new OrbitControls(camera, renderer.domElement);
+			controls.enableDamping = true;
+			controls.dampingFactor = 0.25;
+			controls.screenSpacePanning = false;
+
+			// 创建几何体
+			const torusKnotGeometry = new THREE.TorusKnotGeometry(0.5, 0.2, 100, 16);
+
+			let mergedBoxesGeometry;
+
+			function generateMergedBoxesGeometry() {
+				const { mergeGeometries } = BufferGeometryUtils;
+				const numBoxes = Math.floor(Math.random() * 8) + 3;
+				const geometries = [];
+				let xPos = -(numBoxes * 0.5); // 初始 x 坐标，使原点在中心
+
+				for (let i = 0; i < numBoxes; i++) {
+					const boxHeight = Math.random() * 2 + 1;
+					const boxGeometry = new THREE.BoxGeometry(1, boxHeight, 1);
+					boxGeometry.translate(xPos, boxHeight / 2, 0);
+					xPos += 1;
+					geometries.push(boxGeometry);
+				}
+
+				return mergeGeometries(geometries);
+			}
+
+			mergedBoxesGeometry = generateMergedBoxesGeometry();
+
+			const material = new InterpolatedGradientMaterial({
+				dataPoints: [],
+				dataValues: [],
+				colorLow: new THREE.Color(0x0000ff),
+				colorHigh: new THREE.Color(0xff0000),
+				minValue: 0,
+				maxValue: 1,
+			});
+
+			let shape = new THREE.Mesh(torusKnotGeometry, material);
+			scene.add(shape);
+
+			camera.position.z = 2;
+
+			// 生成随机温度点
+			let dataPoints = [];
+			let dataValues = [];
+			let pointsGeometry = new THREE.BufferGeometry();
+			let pointsColors = [];
+			let pointsSystem;
+
+			function getColorForTemperature(temp) {
+				const hue = 0.7 - temp * 0.7;
+				return new THREE.Color().setHSL(hue, 1, 0.5);
+			}
+
+			function generateRandomPoints() {
+				dataPoints = [];
+				dataValues = [];
+				pointsColors = [];
+
+				const bounds = new THREE.Box3().setFromObject(shape);
+				const size = bounds.getSize(new THREE.Vector3());
+
+				for (let i = 0; i < 10; i++) {
+					const point = new THREE.Vector3(
+						(Math.random() - 0.5) * size.x,
+						(Math.random() - 0.5) * size.y,
+						(Math.random() - 0.5) * size.z
+					);
+					const temperature = Math.random();
+					dataPoints.push(point);
+					dataValues.push(temperature);
+
+					const color = getColorForTemperature(temperature);
+					pointsColors.push(color.r, color.g, color.b);
+				}
+
+				pointsGeometry.setFromPoints(dataPoints);
+				pointsGeometry.setAttribute(
+					"color",
+					new THREE.Float32BufferAttribute(pointsColors, 3)
+				);
+
+				if (pointsSystem) {
+					scene.remove(pointsSystem);
+				}
+
+				const pointsMaterial = new THREE.PointsMaterial({
+					size: 0.05,
+					vertexColors: true,
+				});
+
+				pointsSystem = new THREE.Points(pointsGeometry, pointsMaterial);
+				scene.add(pointsSystem);
+
+				material.uniforms.dataPoints.value = dataPoints;
+				material.uniforms.dataValues.value = dataValues;
+			}
+
+			generateRandomPoints();
+
+			// UI 控制
+			const toggleShape = document.getElementById("toggleShape");
+			const togglePoints = document.getElementById("togglePoints");
+			const refreshPointsButton = document.getElementById("refreshPoints");
+			const geometryTypeRadios = document.querySelectorAll(
+				'input[name="geometryType"]'
+			);
+
+			toggleShape.addEventListener("change", function () {
+				shape.visible = this.checked;
+			});
+
+			togglePoints.addEventListener("change", function () {
+				pointsSystem.visible = this.checked;
+			});
+
+			refreshPointsButton.addEventListener("click", generateRandomPoints);
+
+			geometryTypeRadios.forEach((radio) => {
+				radio.addEventListener("change", function () {
+					if (this.checked) {
+						scene.remove(shape);
+						if (this.value === "torusKnot") {
+							shape = new THREE.Mesh(torusKnotGeometry, material);
+							camera.position.z = 2;
+						} else if (this.value === "mergedBoxes") {
+							mergedBoxesGeometry = generateMergedBoxesGeometry();
+							shape = new THREE.Mesh(mergedBoxesGeometry, material);
+							camera.position.z = 4;
+						}
+						scene.add(shape);
+						generateRandomPoints();
+					}
+				});
+			});
+
+			// GUI 控制
+			const gui = new GUI();
+			const materialFolder = gui.addFolder("InterpolatedGradientMaterial");
+
+			materialFolder
+				.addColor(material.uniforms.colorLow, "value")
+				.name("Color Low");
+			materialFolder
+				.addColor(material.uniforms.colorHigh, "value")
+				.name("Color High");
+			materialFolder
+				.add(material.uniforms.minValue, "value", 0, 1)
+				.name("Min Value");
+			materialFolder
+				.add(material.uniforms.maxValue, "value", 0, 1)
+				.name("Max Value");
+			materialFolder
+				.add(material.uniforms.weightFunctionType, "value", {
+					Inverse: 0,
+					"Inverse Square": 1,
+					Exponential: 2,
+				})
+				.name("Weight Function")
+				.onChange((value) => {
+					material.uniforms.weightFunctionType.value = parseInt(value, 10);
+				});
+			materialFolder
+				.add(material.uniforms.smoothstepEdges.value, "x", 0, 1)
+				.name("Smoothstep Min");
+			materialFolder
+				.add(material.uniforms.smoothstepEdges.value, "y", 0, 1)
+				.name("Smoothstep Max");
+
+			// 动画循环
+			function animate() {
+				requestAnimationFrame(animate);
+				controls.update();
+				renderer.render(scene, camera);
+			}
+			animate();
+
+			// 响应窗口大小变化
+			window.addEventListener("resize", function () {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+			});
+		</script>
+	</body>
+</html>
